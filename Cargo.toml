@@ -1,0 +1,11 @@
+[package]
+name = "iavl-rs"
+version = "0.1.0"
+edition = "2021"
+
+
+[dependencies]
+thiserror = "1.0"
+anyhow = "1.0.55"
+sha2 = "0.10.1"
+hex = "0.4.2"
