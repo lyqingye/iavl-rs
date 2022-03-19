@@ -5,6 +5,6 @@ pub enum AvlTreeError {
     #[error("root hash not found")]
     RootHashNotFound,
 
-    #[error("key and value non exsistence in tree")]
-    ValueNonExsistence,
+    #[error("key and value non existence in tree")]
+    ValueNonExistence,
 }

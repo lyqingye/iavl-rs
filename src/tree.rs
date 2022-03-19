@@ -6,13 +6,13 @@ use anyhow::*;
 use std::cmp::Ordering;
 
 #[derive(PartialEq, Eq, Debug, Clone)]
-pub struct AvlTree {
+pub struct Tree {
     pub root: NodeRef,
 }
 
-impl AvlTree {
+impl Tree {
     pub fn new() -> Self {
-        AvlTree { root: None }
+        Tree { root: None }
     }
 
     pub fn root_hash(&self) -> Option<&Hash> {
@@ -33,7 +33,7 @@ impl AvlTree {
     }
 
     #[cfg(test)]
-    pub fn get_node_ref(&self, key: &[u8]) -> Option<&Box<AvlNode>> {
+    pub fn get_node_ref(&self, key: &[u8]) -> Option<&Box<Node>> {
         let mut node_ref = &self.root;
         while let Some(ref node) = node_ref {
             let node_key: &[u8] = node.key.as_ref();
@@ -49,11 +49,11 @@ impl AvlTree {
     pub fn insert(&mut self, key: &[u8], value: &[u8]) -> Option<Vec<u8>> {
         let node_ref = &mut self.root;
         let mut old_value = None;
-        Self::insert_recrusive(node_ref, key, value, &mut old_value);
+        Self::insert_recursive(node_ref, key, value, &mut old_value);
         old_value
     }
 
-    fn insert_recrusive(
+    fn insert_recursive(
         node_ref: &mut NodeRef,
         key: &[u8],
         value: &[u8],
@@ -62,8 +62,8 @@ impl AvlTree {
         if let Some(node) = node_ref {
             let node_key: &[u8] = node.key.as_ref();
             match node_key.cmp(key) {
-                Ordering::Greater => Self::insert_recrusive(&mut node.left, key, value, old_value),
-                Ordering::Less => Self::insert_recrusive(&mut node.right, key, value, old_value),
+                Ordering::Greater => Self::insert_recursive(&mut node.left, key, value, old_value),
+                Ordering::Less => Self::insert_recursive(&mut node.right, key, value, old_value),
                 Ordering::Equal => return *old_value = Some(node.update_value(value)),
             }
             node.update();
@@ -85,18 +85,18 @@ impl AvlTree {
                 .as_mut()
                 .expect("[AVL]: Unexpected empty left node");
             if left.balance_factor() < 1 {
-                AvlTree::rotate_left(&mut node.left);
+                Tree::rotate_left(&mut node.left);
             }
-            AvlTree::rotate_right(node_ref);
+            Tree::rotate_right(node_ref);
         } else if balance_factor <= -2 {
             let right = node
                 .right
                 .as_mut()
                 .expect("[AVL]: Unexpected empty right node");
             if right.balance_factor() > -1 {
-                AvlTree::rotate_right(&mut node.right);
+                Tree::rotate_right(&mut node.right);
             }
-            AvlTree::rotate_left(node_ref);
+            Tree::rotate_left(node_ref);
         }
     }
 
@@ -124,11 +124,11 @@ impl AvlTree {
 
     #[cfg(test)]
     pub fn validate(&self) -> bool {
-        Self::validate_recrusive(self.root.as_ref().unwrap())
+        Self::validate_recursive(self.root.as_ref().unwrap())
     }
 
     #[cfg(test)]
-    pub fn validate_recrusive(node: &AvlNode) -> bool {
+    pub fn validate_recursive(node: &Node) -> bool {
         if node.is_leaf() {
             assert_eq!(0, node.height, "Leaf node height must be 0");
             return true;
@@ -151,12 +151,12 @@ impl AvlTree {
             return false;
         }
         if let Some(left) = &node.left {
-            if !Self::validate_recrusive(left) {
+            if !Self::validate_recursive(left) {
                 return false;
             }
         }
         if let Some(right) = &node.right {
-            if !Self::validate_recrusive(right) {
+            if !Self::validate_recursive(right) {
                 return false;
             }
         }
@@ -164,16 +164,16 @@ impl AvlTree {
     }
 
     pub fn get_proof(&self, key: &[u8]) -> Option<Proof> {
-        self.get_proof_recrusive(key, &self.root)
+        self.get_proof_recursive(key, &self.root)
     }
 
-    fn get_proof_recrusive(&self, key: &[u8], node: &NodeRef) -> Option<Proof> {
+    fn get_proof_recursive(&self, key: &[u8], node: &NodeRef) -> Option<Proof> {
         if let Some(node) = node {
             let empty_hash = [];
             let node_key: &[u8] = node.key.as_ref();
             let (mut proof, prefix, suffix) = match node_key.cmp(key) {
                 Ordering::Greater => {
-                    let proof = self.get_proof_recrusive(key, &node.left)?;
+                    let proof = self.get_proof_recursive(key, &node.left)?;
                     let prefix = vec![];
                     let mut suffix: Vec<u8> = Vec::with_capacity(64);
                     suffix.extend(node.hash.iter());
@@ -181,7 +181,7 @@ impl AvlTree {
                     (proof, prefix, suffix)
                 }
                 Ordering::Less => {
-                    let proof = self.get_proof_recrusive(key, &node.right)?;
+                    let proof = self.get_proof_recursive(key, &node.right)?;
                     let suffix = vec![];
                     let mut prefix: Vec<u8> = Vec::with_capacity(64);
                     prefix.extend(node.left_hash().unwrap_or(&empty_hash));
@@ -208,14 +208,14 @@ impl AvlTree {
         }
     }
 
-    pub fn verify_exsistence(&self, key: &[u8], value: &[u8], proof: &Proof) -> Result<()> {
+    pub fn verify_existence(&self, key: &[u8], value: &[u8], proof: &Proof) -> Result<()> {
         assert!(proof.key.eq(key));
         assert!(proof.value.eq(value));
         let root = self.root_hash().ok_or(AvlTreeError::RootHashNotFound)?;
-        if proof.calc_exsistence_root().eq(root) {
+        if proof.calc_root_hash().eq(root) {
             Ok(())
         } else {
-            Err(AvlTreeError::ValueNonExsistence.into())
+            Err(AvlTreeError::ValueNonExistence.into())
         }
     }
 }
@@ -226,7 +226,7 @@ mod test {
 
     #[test]
     fn test_simple_tree() {
-        let mut tree = AvlTree::new();
+        let mut tree = Tree::new();
         let now = std::time::Instant::now();
         for i in 0u32..10000u32 {
             let bytes = i.to_le_bytes();
@@ -242,7 +242,7 @@ mod test {
 
     #[test]
     fn test_root_hash() {
-        let mut tree = AvlTree::new();
+        let mut tree = Tree::new();
         let nodes: [u32; 9] = [100, 50, 150, 25, 75, 125, 175, 65, 85];
         let mut hashs = vec![];
         for node in nodes {
@@ -275,7 +275,7 @@ mod test {
 
     #[test]
     fn test_proof() {
-        let mut tree = AvlTree::new();
+        let mut tree = Tree::new();
         for i in 0u32..10000u32 {
             let bytes = i.to_le_bytes();
             tree.insert(&bytes, &bytes);
@@ -284,7 +284,7 @@ mod test {
         for i in 0u32..10000u32 {
             let bytes = i.to_le_bytes();
             let proof = tree.get_proof(&bytes).unwrap();
-            assert!(tree.verify_exsistence(&bytes, &bytes, &proof).is_ok());
+            assert!(tree.verify_existence(&bytes, &bytes, &proof).is_ok());
         }
     }
 }

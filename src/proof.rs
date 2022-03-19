@@ -11,7 +11,7 @@ pub struct Proof {
 }
 
 impl Proof {
-    pub fn calc_exsistence_root(&self) -> Hash {
+    pub fn calc_root_hash(&self) -> Hash {
         let mut hash = hash_array(&[self.key.as_ref(), self.value.as_ref()]);
         for node in &self.path {
             hash = hash_array(&[node.prefix.as_ref(), hash.as_ref(), node.suffix.as_ref()])

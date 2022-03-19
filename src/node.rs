@@ -1,9 +1,9 @@
 use crate::hash::{hash_array, hash_value, Hash};
 
-pub type NodeRef = Option<Box<AvlNode>>;
+pub type NodeRef = Option<Box<Node>>;
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub struct AvlNode {
+pub struct Node {
     pub key: Vec<u8>,
     pub value: Vec<u8>,
     pub hash: Hash,
@@ -15,14 +15,14 @@ pub struct AvlNode {
 
 #[allow(clippy::unnecessary_wraps)]
 pub fn as_node_ref(key: Vec<u8>, value: Vec<u8>) -> NodeRef {
-    Some(Box::new(AvlNode::new(key, value)))
+    Some(Box::new(Node::new(key, value)))
 }
 
-impl AvlNode {
+impl Node {
     fn new(key: Vec<u8>, value: Vec<u8>) -> Self {
         let hash = hash_array(&[key.as_ref(), value.as_ref()]);
         let merkle_hash = hash_value(hash.as_ref());
-        AvlNode {
+        Node {
             key,
             value,
             hash,
