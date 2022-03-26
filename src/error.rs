@@ -8,3 +8,18 @@ pub enum AvlTreeError {
     #[error("key and value non existence in tree")]
     ValueNonExistence,
 }
+
+#[derive(Error, Debug)]
+pub enum DBError {
+    #[error("DownCast Type Fail!")]
+    DownCast,
+
+    #[error("{0}")]
+    WrapError(String),
+
+    #[error("Empty key")]
+    EmptyKey,
+
+    #[error("Empty value")]
+    EmptyValue,
+}

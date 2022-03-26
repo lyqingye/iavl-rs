@@ -1,70 +1,61 @@
+use anyhow::*;
+use rocksdb::{BlockBasedOptions, Cache, Options, ReadOptions, WriteOptions};
+use std::any::Any;
+use std::borrow::BorrowMut;
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, RwLock};
-use anyhow::*;
-use rocksdb:: {
-    ReadOptions,
-    WriteOptions,
-    Cache,
-    Options,
-    BlockBasedOptions,
-};
 
-pub trait DB<Bat: Batch>: Clone + 'static {
+use crate::error::DBError;
 
-    fn get(&self,key: &[u8]) -> Result<&[u8]>;
+pub trait DB {
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
 
-    fn has(&self,key: &[u8]) -> Result<()>;
+    fn has(&self, key: &[u8]) -> Result<bool>;
 
-    fn set(&mut self,key: &[u8], value: &[u8]) -> Result<()>;
+    fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
 
-    fn set_sync(&mut self,key: &[u8], value: &[u8]) -> Result<()>;
+    fn set_sync(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
 
-    fn delete(&mut self,key: &[u8]) -> Result<()>;
+    fn delete(&mut self, key: &[u8]) -> Result<()>;
 
-    fn delete_sync(&mut self,key: &[u8]) -> Result<()>;
+    fn delete_sync(&mut self, key: &[u8]) -> Result<()>;
 
-    fn close(&mut self) -> Result<()>;
+    fn new_batch(&mut self) -> Box<dyn Batch>;
 
-    fn new_batch(&self) -> Bat;
+    fn write_batch(&mut self, batch: Box<dyn Batch>) -> Result<()>;
+
+    fn write_batch_sync(&mut self, batch: Box<dyn Batch>) -> Result<()>;
 }
 
-pub trait Batch: Clone + 'static {
+pub trait Batch {
+    fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
 
-    fn set(&mut self,key: &[u8], value: &[u8]) -> Result<()>;
+    fn delete(&mut self, key: &[u8]) -> Result<()>;
 
-    fn delete(&mut self,key: &[u8]) -> Result<()>;
+    // fn write<D: DB>(&self,db: &mut D) -> Result<()>;
 
-    fn write(&mut self) -> Result<()>;
-
-    fn write_sync(&mut self) -> Result<()>;
-
-    fn close(&self) -> Result<()>;
+    fn as_any(&self) -> &dyn Any;
 }
-
 
 #[derive(Clone)]
 pub struct RocksDB {
-    inner: Arc<RwLock<RocksDBInner>>,
+    inner: Rc<Inner>,
 }
 
-unsafe impl Sync for RocksDB { }
-unsafe impl Send for RocksDB { }
-
-struct RocksDBInner {
+struct Inner {
     db: rocksdb::DB,
     ro: rocksdb::ReadOptions,
     wo: rocksdb::WriteOptions,
     wo_sync: rocksdb::WriteOptions,
 }
 
-pub fn new_rocks_db(name: &str,dir: &Path) -> Result<RocksDB> {
+pub fn new_rocks_db(name: &str, dir: &Path) -> Result<RocksDB> {
     let mut bbto = BlockBasedOptions::default();
-    let cache = Cache::new_lru_cache(1 << 30)
-        .map_err(|_| anyhow!("panic"))?;
+    let cache = Cache::new_lru_cache(1 << 30).map_err(|_| anyhow!("panic"))?;
     bbto.set_block_cache(&cache);
-    bbto.set_bloom_filter(10.0,true);
+    bbto.set_bloom_filter(10.0, true);
 
     let mut opts = Options::default();
     opts.set_block_based_table_factory(&bbto);
@@ -72,57 +63,185 @@ pub fn new_rocks_db(name: &str,dir: &Path) -> Result<RocksDB> {
     opts.increase_parallelism(num_cpus::get() as i32);
     opts.optimize_level_style_compaction(512 * 1024 * 1024);
 
-    let db_path = dir.join(format!("{}.db",name));
-    let db = rocksdb::DB::open(&opts,db_path)
-        .map_err(|_| anyhow!("open db fail"))?;
+    let db_path = dir.join(format!("{}.db", name));
+    let db = rocksdb::DB::open(&opts, db_path).map_err(|_| anyhow!("open db fail"))?;
 
     let ro = ReadOptions::default();
     let wo = WriteOptions::default();
     let mut wo_sync = WriteOptions::default();
     wo_sync.set_sync(true);
 
-    Ok(RocksDB{
-        inner: Arc::new(RwLock::new(
-            RocksDBInner {
-                db,
-                ro,
-                wo,
-                wo_sync,
-            }
-        ))
+    Ok(RocksDB {
+        inner: Rc::new(Inner {
+            db,
+            ro,
+            wo,
+            wo_sync,
+        }),
     })
 }
 
-impl <Bat: Batch> DB<Bat> for RocksDB {
-    fn get(&self, key: &[u8]) -> Result<&[u8]> {
-        let inner = self.inner.read().map_err(|_| anyhow!("faild to get read lock"))?;
+impl DB for RocksDB {
+    fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>> {
+        if key.is_empty() {
+            return Err(DBError::EmptyKey.into());
+        }
+        self.inner
+            .db
+            .get(key)
+            .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
-    fn has(&self, key: &[u8]) -> Result<()> {
-        todo!()
+    fn has(&self, key: &[u8]) -> Result<bool> {
+        if key.is_empty() {
+            return Err(DBError::EmptyKey.into());
+        }
+        Ok(self.inner.db.key_may_exist(key))
     }
 
     fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
-        todo!()
+        if key.is_empty() {
+            return Err(DBError::EmptyKey.into());
+        }
+        if value.is_empty() {
+            return Err(DBError::EmptyValue.into());
+        }
+        self.inner
+            .db
+            .put(key, value)
+            .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
     fn set_sync(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
-        todo!()
+        if key.is_empty() {
+            return Err(DBError::EmptyKey.into());
+        }
+        if value.is_empty() {
+            return Err(DBError::EmptyValue.into());
+        }
+        self.inner
+            .db
+            .put_opt(key, value, &self.inner.wo_sync)
+            .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
     fn delete(&mut self, key: &[u8]) -> Result<()> {
-        todo!()
+        if key.is_empty() {
+            return Err(DBError::EmptyKey.into());
+        }
+        self.inner
+            .db
+            .delete(key)
+            .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
     fn delete_sync(&mut self, key: &[u8]) -> Result<()> {
-        todo!()
+        if key.is_empty() {
+            return Err(DBError::EmptyKey.into());
+        }
+        self.inner
+            .db
+            .delete_opt(key, &self.inner.wo_sync)
+            .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
-    fn close(&mut self) -> Result<()> {
-        todo!()
+    fn new_batch(&mut self) -> Box<dyn Batch> {
+        Box::new(RocksDBBatch {
+            inner: Rc::new(RefCell::new(rocksdb::WriteBatch::default())),
+        })
     }
 
-    fn new_batch(&self) -> Bat {
-        todo!()
+    fn write_batch(&mut self, batch: Box<dyn Batch>) -> Result<()> {
+        let b = batch
+            .as_any()
+            .downcast_ref::<RocksDBBatch>()
+            .ok_or(DBError::DownCast)?
+            .to_owned();
+        self.inner
+            .db
+            .write(b.inner.take())
+            .map_err(|e| DBError::WrapError(e.to_string()).into())
+    }
+
+    fn write_batch_sync(&mut self, batch: Box<dyn Batch>) -> Result<()> {
+        let b = batch
+            .as_any()
+            .downcast_ref::<RocksDBBatch>()
+            .ok_or(DBError::DownCast)?
+            .to_owned();
+        self.inner
+            .db
+            .write_opt(b.inner.take(),&self.inner.wo_sync)
+            .map_err(|e| DBError::WrapError(e.to_string()).into())
+    }
+}
+
+impl Drop for RocksDB {
+    fn drop(&mut self) {
+        self.inner.db.flush().unwrap();
+    }
+}
+
+#[derive(Clone)]
+pub struct RocksDBBatch {
+    inner: Rc<RefCell<rocksdb::WriteBatch>>,
+}
+
+impl Batch for RocksDBBatch {
+    fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()> {
+        if key.is_empty() {
+            return Err(DBError::EmptyKey.into());
+        }
+        if value.is_empty() {
+            return Err(DBError::EmptyValue.into());
+        }
+        self.inner.as_ref().borrow_mut().put(key, value);
+        Ok(())
+    }
+
+    fn delete(&mut self, key: &[u8]) -> Result<()> {
+        if key.is_empty() {
+            return Err(DBError::EmptyKey.into());
+        }
+        self.inner.as_ref().borrow_mut().delete(key);
+        Ok(())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    pub fn test_crud() {
+        let mut db = new_rocks_db("db", &std::env::temp_dir()).unwrap();
+        db.set(b"key", b"value").unwrap();
+        assert_eq!(true, db.has(b"key").unwrap());
+        assert_eq!(Some(b"value".to_vec()), db.get(b"key").unwrap());
+        db.delete(b"key").unwrap();
+        assert_eq!(false, db.has(b"key").unwrap());
+        assert_eq!(None, db.get(b"key").unwrap());
+        drop(db);
+        std::fs::remove_dir_all(std::env::temp_dir().join("db.db")).unwrap();
+    }
+
+    #[test]
+    pub fn test_batch() {
+        let mut db = new_rocks_db("db", &std::env::temp_dir()).unwrap();
+        let mut batch = db.new_batch();
+
+        for i in 0u32..100u32 {
+            batch.set(&i.to_le_bytes(), &i.to_le_bytes()).unwrap();
+        }
+        db.write_batch_sync(batch).unwrap();
+        for i in 0u32..100u32 {
+            assert_eq!(true, db.has(&i.to_le_bytes()).unwrap());
+        }
+        drop(db);
+        std::fs::remove_dir_all(std::env::temp_dir().join("db.db")).unwrap();
     }
 }
