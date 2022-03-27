@@ -49,7 +49,7 @@ struct Inner {
 
 pub fn new_rocks_db(name: &str, dir: &Path) -> Result<RocksDB> {
     let mut bbto = BlockBasedOptions::default();
-    let cache = Cache::new_lru_cache(1 << 30).map_err(|_| anyhow!("panic"))?;
+    let cache = Cache::new_lru_cache(1 << 30).map_err(|e| DBError::WrapError(e.to_string()))?;
     bbto.set_block_cache(&cache);
     bbto.set_bloom_filter(10.0, true);
 
@@ -60,7 +60,7 @@ pub fn new_rocks_db(name: &str, dir: &Path) -> Result<RocksDB> {
     opts.optimize_level_style_compaction(512 * 1024 * 1024);
 
     let db_path = dir.join(format!("{}.db", name));
-    let db = rocksdb::DB::open(&opts, db_path).map_err(|_| anyhow!("open db fail"))?;
+    let db = rocksdb::DB::open(&opts, db_path).map_err(|e| DBError::WrapError(e.to_string()))?;
 
     let ro = ReadOptions::default();
     let wo = WriteOptions::default();
@@ -84,7 +84,7 @@ impl DB for RocksDB {
         }
         self.inner
             .db
-            .get_opt(key,&self.inner.ro)
+            .get_opt(key, &self.inner.ro)
             .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
@@ -104,7 +104,7 @@ impl DB for RocksDB {
         }
         self.inner
             .db
-            .put_opt(key, value,&self.inner.wo)
+            .put_opt(key, value, &self.inner.wo)
             .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
@@ -127,7 +127,7 @@ impl DB for RocksDB {
         }
         self.inner
             .db
-            .delete_opt(key,&self.inner.wo)
+            .delete_opt(key, &self.inner.wo)
             .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
@@ -167,7 +167,7 @@ impl DB for RocksDB {
             .to_owned();
         self.inner
             .db
-            .write_opt(b.inner.take(),&self.inner.wo_sync)
+            .write_opt(b.inner.take(), &self.inner.wo_sync)
             .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 }
