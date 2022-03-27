@@ -1,11 +1,9 @@
 use anyhow::*;
 use rocksdb::{BlockBasedOptions, Cache, Options, ReadOptions, WriteOptions};
 use std::any::Any;
-use std::borrow::BorrowMut;
 use std::cell::RefCell;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::rc::Rc;
-use std::sync::{Arc, RwLock};
 
 use crate::error::DBError;
 
@@ -33,8 +31,6 @@ pub trait Batch {
     fn set(&mut self, key: &[u8], value: &[u8]) -> Result<()>;
 
     fn delete(&mut self, key: &[u8]) -> Result<()>;
-
-    // fn write<D: DB>(&self,db: &mut D) -> Result<()>;
 
     fn as_any(&self) -> &dyn Any;
 }
@@ -88,7 +84,7 @@ impl DB for RocksDB {
         }
         self.inner
             .db
-            .get(key)
+            .get_opt(key,&self.inner.ro)
             .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
@@ -108,7 +104,7 @@ impl DB for RocksDB {
         }
         self.inner
             .db
-            .put(key, value)
+            .put_opt(key, value,&self.inner.wo)
             .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
@@ -131,7 +127,7 @@ impl DB for RocksDB {
         }
         self.inner
             .db
-            .delete(key)
+            .delete_opt(key,&self.inner.wo)
             .map_err(|e| DBError::WrapError(e.to_string()).into())
     }
 
@@ -218,7 +214,7 @@ mod test {
 
     #[test]
     pub fn test_crud() {
-        let mut db = new_rocks_db("db", &std::env::temp_dir()).unwrap();
+        let mut db = new_rocks_db("test_crud", &std::env::temp_dir()).unwrap();
         db.set(b"key", b"value").unwrap();
         assert_eq!(true, db.has(b"key").unwrap());
         assert_eq!(Some(b"value".to_vec()), db.get(b"key").unwrap());
@@ -226,12 +222,12 @@ mod test {
         assert_eq!(false, db.has(b"key").unwrap());
         assert_eq!(None, db.get(b"key").unwrap());
         drop(db);
-        std::fs::remove_dir_all(std::env::temp_dir().join("db.db")).unwrap();
+        std::fs::remove_dir_all(std::env::temp_dir().join("test_crud.db")).unwrap();
     }
 
     #[test]
     pub fn test_batch() {
-        let mut db = new_rocks_db("db", &std::env::temp_dir()).unwrap();
+        let mut db = new_rocks_db("test_batch", &std::env::temp_dir()).unwrap();
         let mut batch = db.new_batch();
 
         for i in 0u32..100u32 {
@@ -242,6 +238,6 @@ mod test {
             assert_eq!(true, db.has(&i.to_le_bytes()).unwrap());
         }
         drop(db);
-        std::fs::remove_dir_all(std::env::temp_dir().join("db.db")).unwrap();
+        std::fs::remove_dir_all(std::env::temp_dir().join("test_batch.db")).unwrap();
     }
 }
